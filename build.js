@@ -43,6 +43,10 @@ const header = `// ==UserScript==
 
 const entry = `
   var win = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
+  console.log('[BLS] 脚本启动, 模块导出检查:', {
+    config: typeof config.createConfig, packet: typeof packet.parsePacket,
+    httpHook: typeof httpHook.installHttpHook, wsHook: typeof wsHook.installWsHook, ui: typeof ui.installUi
+  });
 
   // 存储后端:优先 GM_*,无则降级 localStorage
   var storage = (typeof GM_setValue !== 'undefined' && typeof GM_getValue !== 'undefined')
@@ -54,12 +58,13 @@ const entry = `
   var onIntercept = function () { interceptCount++; };
 
   var cfg = config.createConfig(storage);
+  console.log('[BLS] config 创建成功, stealth=' + cfg.getStealth());
 
-  try { httpHook.installHttpHook(win, cfg, onIntercept); } catch (e) { console.warn('[BLS] HTTP hook 失败', e); }
-  try { wsHook.installWsHook(win, cfg, onIntercept); } catch (e) { console.warn('[BLS] WS hook 失败', e); }
+  try { httpHook.installHttpHook(win, cfg, onIntercept); console.log('[BLS] HTTP hook 已装'); } catch (e) { console.warn('[BLS] HTTP hook 失败', e); }
+  try { wsHook.installWsHook(win, cfg, onIntercept); console.log('[BLS] WS hook 已装, win.WebSocket 被代理?', win.WebSocket !== win.WebSocket.constructor.prototype.constructor); } catch (e) { console.warn('[BLS] WS hook 失败', e); }
 
   function startUi() {
-    try { ui.installUi(win, cfg, function () { return interceptCount; }); } catch (e) { console.warn('[BLS] UI 失败', e); }
+    try { ui.installUi(win, cfg, function () { return interceptCount; }); console.log('[BLS] UI 已注入'); } catch (e) { console.warn('[BLS] UI 失败', e); }
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', startUi);
