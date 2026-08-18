@@ -1,0 +1,14 @@
+{
+  "name": "bilibili-live-stealth",
+  "version": "1.0.0",
+  "private": true,
+  "description": "B站直播隐身观看油猴脚本",
+  "scripts": {
+    "test": "mocha",
+    "build": "node build.js"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0",
+    "mocha": "^10.0.0"
+  }
+}
