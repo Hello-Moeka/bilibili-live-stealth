@@ -53,7 +53,7 @@ describe('build 产物可执行性', () => {
     // open 不真发网络(jsdom 默认不连网);我们只验证 hook 伪造了响应
     let intercepted = false;
     try {
-      xhr.open('POST', 'https://api.live.bilibili.com/xlive/web-room/v1/index/roomEntryAction');
+      xhr.open('POST', 'https://data.bilivideo.com/log/web/s82Tq');
       xhr.send();
     } catch (e) {
       // jsdom open 可能抛跨域,但 hook 在 send 阶段拦截;若已抛说明 hook 没接管

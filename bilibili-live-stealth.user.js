@@ -45,11 +45,13 @@ module.exports = { createConfig };
 
   var httpHook = (function () {
     var module = { exports: {} };
+// 阻断列表:命中则不真发,伪造成功响应(在线心跳,不需要服务端响应)
 const BLOCKED_URLS = [
-  '/xlive/web-room/v1/index/roomEntryAction',   // 进房上报
-  '/xlive/web-room/v1/index/TrigerInteract',     // 触发进房互动广播(XXX进入直播间)
-  'data.bilivideo.com/log/web/'                  // 在线心跳:te9Kl(进房首包+签名校验)、s82Tq(周期心跳)
+  'data.bilivideo.com/log/web/'   // 在线心跳:te9Kl(进房首包+签名校验)、s82Tq(周期心跳)
 ];
+
+// getInfoByUser 的 room_id 换成假号 27227:服务端以为你进假房间,不广播进房,但仍返回有效响应
+const FAKE_ROOM = '27227';
 
 function shouldBlock(url) {
   if (!url || typeof url !== 'string') return false;
@@ -60,7 +62,7 @@ function fakeResponseText() {
   return '{"code":0,"message":"OK","data":{}}';
 }
 
-// 包裹 XHR 与 fetch;命中拦截则伪造成功响应不真发,调 onIntercept
+// 包裹 XHR 与 fetch
 function installHttpHook(win, cfg, onIntercept) {
   wrapXhr(win, cfg, onIntercept);
   wrapFetch(win, cfg, onIntercept);
@@ -74,6 +76,12 @@ function wrapXhr(win, cfg, onIntercept) {
 
   Orig.prototype.open = function (method, url) {
     this.__bls_url = url;
+    // 捕获弹幕 history API URL,供 ws-hook 弹幕脱敏修复使用
+    try {
+      if (cfg.getStealth() && url && String(url).includes('history') && !String(url).includes('|')) {
+        win.__blsHistoryApi = String(url);
+      }
+    } catch (e) {}
     return origOpen.apply(this, arguments);
   };
 
@@ -82,8 +90,6 @@ function wrapXhr(win, cfg, onIntercept) {
       try {
         onIntercept && onIntercept();
         const fake = fakeResponseText();
-        // readyState/responseText 等是只读属性,直接赋值无效;
-        // 用 defineProperty 改成可写后再赋,再触发回调,让页面以为上报成功。
         const self = this;
         const props = ['readyState', 'status', 'responseText', 'response'];
         for (const p of props) {
@@ -93,19 +99,12 @@ function wrapXhr(win, cfg, onIntercept) {
         self.status = 200;
         self.responseText = fake;
         self.response = fake;
-        // 先派发 readystatechange 事件(覆盖 addEventListener 监听器)
         try { self.dispatchEvent(new win.Event('readystatechange')); } catch (e) {}
-        // 再派发 load 事件 + 调 on* 属性回调,覆盖两种注册方式
         try { self.dispatchEvent(new win.Event('load')); } catch (e) {}
-        if (typeof self.onreadystatechange === 'function') {
-          self.onreadystatechange();
-        }
-        if (typeof self.onload === 'function') {
-          self.onload();
-        }
+        if (typeof self.onreadystatechange === 'function') self.onreadystatechange();
+        if (typeof self.onload === 'function') self.onload();
         return;
-      } catch (e) { /* 失败降级:真发 */
-      }
+      } catch (e) { /* 失败降级:真发 */ }
     }
     return origSend.apply(this, arguments);
   };
@@ -115,23 +114,34 @@ function wrapFetch(win, cfg, onIntercept) {
   const Orig = win.fetch;
   if (!Orig) return;
   win.fetch = function (input, init) {
-    const url = typeof input === 'string' ? input : (input && input.url) || '';
-    if (cfg.getStealth() && shouldBlock(url)) {
-      onIntercept && onIntercept();
-      const text = fakeResponseText();
-      // 优先用原生 Response;无 Response 时用最小桩,保证返回 thenable
-      if (typeof win.Response === 'function') {
-        try {
-          return Promise.resolve(new win.Response(text, { status: 200, headers: { 'content-type': 'application/json' } }));
-        } catch (e) { /* 降级到桩 */ }
+    let url = typeof input === 'string' ? input : (input && input.url) || '';
+
+    if (cfg.getStealth()) {
+      // getInfoByUser:把真实 room_id 换成假号,服务端不广播进房
+      if (typeof input === 'string' && input.includes('getInfoByUser')) {
+        const m = win.location.pathname.match(/^\/(\d+)/);
+        if (m && m[1] !== FAKE_ROOM) {
+          input = input.replace(new RegExp('room_id=' + m[1]), 'room_id=' + FAKE_ROOM);
+          onIntercept && onIntercept();
+        }
       }
-      return Promise.resolve({
-        ok: true, status: 200, statusText: 'OK',
-        text: function () { return Promise.resolve(text); },
-        json: function () { return Promise.resolve(JSON.parse(text)); }
-      });
+      // getDanmuInfo:不带 cookie,拿游客弹幕 token
+      if (typeof input === 'string' && input.includes('getDanmuInfo')) {
+        init = init || {};
+        init.credentials = 'omit';
+        onIntercept && onIntercept();
+      }
+      // 在线心跳:阻断
+      if (shouldBlock(url)) {
+        onIntercept && onIntercept();
+        const text = fakeResponseText();
+        if (typeof win.Response === 'function') {
+          try { return Promise.resolve(new win.Response(text, { status: 200, headers: { 'content-type': 'application/json' } })); } catch (e) {}
+        }
+        return Promise.resolve({ ok: true, status: 200, text: function () { return Promise.resolve(text); }, json: function () { return Promise.resolve(JSON.parse(text)); } });
+      }
     }
-    return Orig.apply(this, arguments);
+    return Orig.call(this, input, init);
   };
 }
 
@@ -156,10 +166,10 @@ function parsePacket(buf) {
   const body = bytes.slice(headerLength, packetLength);
   return { packetLength, headerLength, protoVer, op, seq, body };
 }
-function buildPacket(op, body, protoVer = 1, seq = 1) {
-  const bodyBytes = body instanceof Uint8Array
-    ? body
-    : new TextEncoder().encode(String(body));
+function buildPacket(op, body, protoVer, seq) {
+  if (protoVer === undefined) protoVer = 1;
+  if (seq === undefined) seq = 1;
+  const bodyBytes = body instanceof Uint8Array ? body : new TextEncoder().encode(String(body));
   const total = HEADER_LEN + bodyBytes.length;
   const out = new Uint8Array(total);
   const dv = new DataView(out.buffer);
@@ -195,7 +205,69 @@ function rewriteAuthPacket(buf, newUid) {
   }
 }
 
-// 安装 WS hook:改写 op=7 uid=0(隐身开启时);每次改写调 onIntercept
+// 弹幕脱敏修复:uid=0 会让收到的弹幕用户名脱敏(变*),用 history API 查回真实用户名补上
+function startDanmakuRepair(win, getHistoryApi) {
+  const doc = win.document;
+  function reviseDanmakuName(el, retry) {
+    const api = getHistoryApi();
+    if (!api || retry >= 5) return;
+    try {
+      const xhr = new win.XMLHttpRequest();
+      xhr.open('GET', api);
+      xhr.onreadystatechange = function () {
+        if (xhr.readyState !== 4 || xhr.status !== 200) return;
+        try {
+          const json = JSON.parse(xhr.responseText);
+          const list = json && json.data && json.data.room;
+          if (!json || json.code !== 0 || !Array.isArray(list)) return;
+          let done = false;
+          for (let i = list.length - 1; i >= 0; i--) {
+            const item = list[i];
+            if (el.getAttribute('data-ct') === (item && item.check_info && item.check_info.ct)) {
+              const attrs = el.getAttributeNames();
+              if (attrs[1]) el.setAttribute(attrs[1], item.nickname);
+              if (attrs[5]) el.setAttribute(attrs[5], item.uid);
+              const name = el.getElementsByClassName('user-name')[0];
+              if (name) name.textContent = item.nickname + ' : ';
+              done = true;
+              break;
+            }
+          }
+          if (!done) setTimeout(function () { reviseDanmakuName(el, retry + 1); }, 1000);
+        } catch (e) {}
+      };
+      xhr.send();
+    } catch (e) {}
+  }
+
+  function observeChat() {
+    const container = doc.getElementById('chat-items');
+    if (!container) return false;
+    new win.MutationObserver(function (mutations) {
+      mutations.forEach(function (m) {
+        m.addedNodes.forEach(function (el) {
+          try {
+            if (!el || !el.classList || !el.classList.value || !el.classList.value.includes('danmaku')) return;
+            const ct = el.getAttribute('data-ct');
+            if (ct != null && ct.length === 0) el.style.display = 'none';
+            const attrs = el.getAttributeNames();
+            if (attrs[5] && el.getAttribute(attrs[5]) === '0') reviseDanmakuName(el, 0);
+          } catch (e) {}
+        });
+      });
+    }).observe(container, { childList: true });
+    return true;
+  }
+
+  if (!observeChat()) {
+    const timer = win.setInterval(function () {
+      if (observeChat()) win.clearInterval(timer);
+    }, 1000);
+    setTimeout(function () { win.clearInterval(timer); }, 15000);
+  }
+}
+
+// 安装 WS hook:改写 op=7 uid=0(隐身开启时);每次改写调 onIntercept;修复脱敏弹幕
 function installWsHook(win, cfg, onIntercept) {
   const Orig = win.WebSocket;
   if (!Orig) return;
@@ -204,6 +276,7 @@ function installWsHook(win, cfg, onIntercept) {
     construct(target, args) {
       const ws = Reflect.construct(target, args);
       const origSend = ws.send ? ws.send.bind(ws) : null;
+      let historyApi = null;
       if (origSend) {
         ws.send = function (data) {
           try {
@@ -217,6 +290,10 @@ function installWsHook(win, cfg, onIntercept) {
           } catch (e) { /* 任何异常原样透传 */ }
           return origSend(data);
         };
+      }
+      // 启动弹幕脱敏修复,historyApi 从 win.__blsHistoryApi 动态读取(http-hook 捕获)
+      if (cfg.getStealth()) {
+        try { startDanmakuRepair(win, function () { return win.__blsHistoryApi || null; }); } catch (e) {}
       }
       return ws;
     }

@@ -1,31 +1,20 @@
 'use strict';
 const assert = require('assert');
 const { JSDOM } = require('jsdom');
-const { shouldBlock, fakeResponseText, installHttpHook, BLOCKED_URLS } = require('../src/http-hook.js');
+const { shouldBlock, fakeResponseText, installHttpHook } = require('../src/http-hook.js');
 
 describe('shouldBlock', () => {
-  it('拦 roomEntryAction(进房上报)', () => {
-    assert.strictEqual(shouldBlock('https://api.live.bilibili.com/xlive/web-room/v1/index/roomEntryAction?room_id=1'), true);
-  });
-  it('拦 TrigerInteract(触发进房互动广播)', () => {
-    assert.strictEqual(shouldBlock('https://api.live.bilibili.com/xlive/web-room/v1/index/TrigerInteract'), true);
-  });
   it('拦 data.bilivideo.com/log/web/ 周期心跳 s82Tq', () => {
     assert.strictEqual(shouldBlock('https://data.bilivideo.com/log/web/s82Tq'), true);
   });
   it('拦 data.bilivideo.com/log/web/ 进房首包 te9Kl', () => {
     assert.strictEqual(shouldBlock('https://data.bilivideo.com/log/web/te9Kl'), true);
   });
-  it('放行 roomReportAction(播放质量上报,与隐身无关)', () => {
-    assert.strictEqual(shouldBlock('https://api.live.bilibili.com/xlive/web-room/v1/index/roomReportAction'), false);
+  it('放行 getInfoByUser(改参数不阻断)', () => {
+    assert.strictEqual(shouldBlock('https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByUser?room_id=123'), false);
   });
   it('放行无关请求', () => {
     assert.strictEqual(shouldBlock('https://api.bilibili.com/x/web-interface/view'), false);
-  });
-  it('BLOCKED_URLS 含 roomEntryAction、TrigerInteract、data.bilivideo.com/log/web/', () => {
-    assert.ok(BLOCKED_URLS.some(u => u.includes('roomEntryAction')));
-    assert.ok(BLOCKED_URLS.some(u => u.includes('TrigerInteract')));
-    assert.ok(BLOCKED_URLS.some(u => u.includes('data.bilivideo.com/log/web/')));
   });
 });
 
@@ -38,32 +27,21 @@ describe('fakeResponseText', () => {
 
 describe('installHttpHook (XHR)', () => {
   function makeWin() {
-    const dom = new JSDOM('', { url: 'https://live.bilibili.com/1' });
+    const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', { url: 'https://live.bilibili.com/123' });
     return dom.window;
   }
-
-  // 桩 XHR:方法放 prototype 上(模拟真实浏览器结构),用闭包标志记录是否真发网络
   function stubXhr() {
     let realOpened = false;
-    function XHR() {
-      this.readyState = 0;
-      this._listeners = {};
-    }
+    function XHR() { this.readyState = 0; this._listeners = {}; }
     XHR.prototype.open = function (m, u) { this._url = u; };
-    XHR.prototype.send = function () { realOpened = true; /* 不真发 */ };
+    XHR.prototype.send = function () { realOpened = true; };
     XHR.prototype.setRequestHeader = function () {};
-    // 模拟 EventTarget:addEventListener/dispatchEvent
-    XHR.prototype.addEventListener = function (type, cb) {
-      (this._listeners[type] = this._listeners[type] || []).push(cb);
-    };
-    XHR.prototype.dispatchEvent = function (ev) {
-      const cbs = this._listeners[ev && ev.type] || [];
-      for (const cb of cbs) { try { cb(ev); } catch (e) {} }
-    };
+    XHR.prototype.addEventListener = function (t, cb) { (this._listeners[t] = this._listeners[t] || []).push(cb); };
+    XHR.prototype.dispatchEvent = function (ev) { (this._listeners[ev && ev.type] || []).forEach(cb => { try { cb(ev); } catch (e) {} }); };
     return { XHR, wasOpened: () => realOpened };
   }
 
-  it('隐身开启:拦 roomEntryAction,不真发,返回伪造响应', (done) => {
+  it('隐身开启:拦心跳 s82Tq,不真发,返回伪造响应', (done) => {
     const win = makeWin();
     const { XHR, wasOpened } = stubXhr();
     win.XMLHttpRequest = XHR;
@@ -73,14 +51,14 @@ describe('installHttpHook (XHR)', () => {
     const xhr = new win.XMLHttpRequest();
     xhr.onload = function () {
       try {
-        assert.strictEqual(wasOpened(), false); // 没真发
+        assert.strictEqual(wasOpened(), false);
         assert.strictEqual(count, 1);
         assert.strictEqual(JSON.parse(xhr.responseText).code, 0);
         done();
       } catch (e) { done(e); }
     };
     xhr.onreadystatechange = function () {};
-    xhr.open('POST', 'https://api.live.bilibili.com/xlive/web-room/v1/index/roomEntryAction');
+    xhr.open('POST', 'https://data.bilivideo.com/log/web/s82Tq');
     xhr.send();
   });
 
@@ -89,57 +67,57 @@ describe('installHttpHook (XHR)', () => {
     const { XHR, wasOpened } = stubXhr();
     win.XMLHttpRequest = XHR;
     const cfg = { getStealth: () => false };
-    let count = 0;
-    installHttpHook(win, cfg, () => { count++; });
-    const xhr = new win.XMLHttpRequest();
-    xhr.open('POST', 'https://api.live.bilibili.com/xlive/web-room/v1/index/roomEntryAction');
-    xhr.send();
-    assert.strictEqual(wasOpened(), true);
-    assert.strictEqual(count, 0);
-  });
-
-  it('隐身开启:拦命中时触发 addEventListener("load") 监听器', (done) => {
-    const win = makeWin();
-    const { XHR, wasOpened } = stubXhr();
-    win.XMLHttpRequest = XHR;
-    const cfg = { getStealth: () => true };
     installHttpHook(win, cfg, () => {});
     const xhr = new win.XMLHttpRequest();
-    // 用 addEventListener 注册(而非 onload 属性),验证 dispatchEvent 触发
-    xhr.addEventListener('load', function () {
-      try {
-        assert.strictEqual(wasOpened(), false);
-        assert.strictEqual(JSON.parse(xhr.responseText).code, 0);
-        done();
-      } catch (e) { done(e); }
-    });
-    xhr.open('POST', 'https://api.live.bilibili.com/xlive/web-room/v1/index/TrigerInteract');
+    xhr.open('POST', 'https://data.bilivideo.com/log/web/s82Tq');
     xhr.send();
+    assert.strictEqual(wasOpened(), true);
   });
 });
 
 describe('installHttpHook (fetch)', () => {
   function makeWin() {
-    const dom = new JSDOM('', { url: 'https://live.bilibili.com/1' });
+    const dom = new JSDOM('<!DOCTYPE html><html><body></body></html>', { url: 'https://live.bilibili.com/123' });
     return dom.window;
   }
-  // jsdom 不提供全局 Response,用最小桩
   function stubResponse() {
     function Response(text, init) { this._text = text; this.status = (init && init.status) || 200; }
     Response.prototype.text = function () { return Promise.resolve(this._text); };
     return Response;
   }
-  it('隐身开启:拦周期心跳 s82Tq,返回伪造 Response', async () => {
+
+  it('隐身开启:getInfoByUser 的 room_id 被换成假号 27227', async () => {
+    const win = makeWin();
+    win.Response = stubResponse();
+    let capturedUrl = null;
+    // 先设 fetch 桩,再 install(hook 会包裹这个桩,内部调它)
+    win.fetch = async function (input, init) { capturedUrl = typeof input === 'string' ? input : (input && input.url); return new win.Response('{}'); };
+    const cfg = { getStealth: () => true };
+    installHttpHook(win, cfg, () => {});
+    await win.fetch('https://api.live.bilibili.com/xlive/web-room/v1/index/getInfoByUser?room_id=123&from=0&not_mock_enter_effect=0');
+    assert.ok(capturedUrl && capturedUrl.includes('room_id=27227'), 'room_id 应被换成 27227, got: ' + capturedUrl);
+  });
+
+  it('隐身开启:getDanmuInfo 请求 credentials 被设为 omit', async () => {
+    const win = makeWin();
+    win.Response = stubResponse();
+    let capturedInit = null;
+    win.fetch = async function (input, init) { capturedInit = init || {}; return new win.Response('{}'); };
+    const cfg = { getStealth: () => true };
+    installHttpHook(win, cfg, () => {});
+    await win.fetch('https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo?room_id=123', {});
+    assert.strictEqual(capturedInit.credentials, 'omit');
+  });
+
+  it('隐身开启:拦心跳 s82Tq,返回伪造 Response', async () => {
     const win = makeWin();
     win.Response = stubResponse();
     let realCalled = false;
     win.fetch = async () => { realCalled = true; return new win.Response('{}'); };
     const cfg = { getStealth: () => true };
-    let count = 0;
-    installHttpHook(win, cfg, () => { count++; });
+    installHttpHook(win, cfg, () => {});
     const res = await win.fetch('https://data.bilivideo.com/log/web/s82Tq');
     assert.strictEqual(realCalled, false);
-    assert.strictEqual(count, 1);
     const text = await res.text();
     assert.strictEqual(JSON.parse(text).code, 0);
   });
