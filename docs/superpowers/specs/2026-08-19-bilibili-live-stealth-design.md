@@ -9,29 +9,32 @@
 B站直播"被主播看到"走两条独立通道,都必须处理:
 
 ### 1.1 HTTP 通道
+> 以下接口经 B 站直播核心 bundle `blfe-live-room/app.js` 源码确认(2026-08-19 抓取)。旧文档中的 `live-trace.bilibili.com/.../webHeartBeat` 和 `x25Kn` 已废弃,当前前端不再调用。
+
 | 接口 | 作用 | 本脚本处理 |
 |---|---|---|
-| `POST api.live.bilibili.com/xlive/web-room/v1/index/roomEntryAction` | 进房上报,触发"XXX进入直播间" | **拦截** |
-| `GET live-trace.bilibili.com/xlive/rdata-interface/v1/heartbeat/webHeartBeat` | 在线人数/在线列表心跳 | **拦截** |
-| `POST live-trace.bilibili.com/xlive/data-interface/v1/x25Kn/E` | 加密心跳首包,决定亲密度 | **放行**(保留亲密度) |
-| `POST live-trace.bilibili.com/xlive/data-interface/v1/x25Kn/X` | 加密心跳续包,决定亲密度 | **放行**(保留亲密度) |
-| `GET api.live.bilibili.com/relation/v1/Feed/heartBeat` | 关注流心跳,与隐身无关 | **放行**(避免误伤) |
+| `POST api.live.bilibili.com/xlive/web-room/v1/index/roomEntryAction` | 进房上报 | **拦截** |
+| `POST api.live.bilibili.com/xlive/web-room/v1/index/TrigerInteract` | 触发进房互动广播(XXX进入直播间),带 cookie | **拦截** |
+| `POST data.bilivideo.com/log/web/te9Kl` | 进房首包+签名校验(reportEnterRoom/reportCheckSign) | **拦截**(域名+前缀宽匹配) |
+| `POST data.bilivideo.com/log/web/s82Tq` | 周期在线心跳(reportHeartBeat),决定在线状态 | **拦截**(域名+前缀宽匹配) |
+| `POST api.live.bilibili.com/xlive/web-room/v1/index/roomReportAction` | 播放质量上报,与隐身无关 | **放行** |
 
 ### 1.2 WebSocket 通道
 弹幕连接 `wss://{host}/sub`,二进制包 = 16字节定长头 + body。关键操作码:
 
 | op | 方向 | 含义 | 本脚本处理 |
 |---|---|---|---|
-| 7 | 客户端→服务器 | 进房/认证包(JSON: `{uid,roomid,protover,platform,type,key}`) | **改写 uid→0 后发送**(不拦,否则5秒断连没弹幕) |
+| 7 | 客户端→服务器 | 进房/认证包(JSON: `{uid,roomid,protover:3,buvid,support_ack,queue_uuid,scene,platform:"web",type:2,key}`) | **改写 uid→0 后发送**(不拦,否则5秒断连没弹幕) |
 | 2 | 客户端→服务器 | 心跳包 | **照发**(维持连接,不影响隐身) |
-| 5 | 服务器→客户端 | 业务消息 | 可选:过滤自己触发的 `INTERACT_WORD` |
+| 5 | 服务器→客户端 | 业务消息 | 透传 |
 | 8 | 服务器→客户端 | 认证回复 | 透传 |
 
 ### 1.3 权衡与风险
-- **保留亲密度的代价**:不拦 `x25Kn` → 亲密度照涨、小心心照拿,但理论上可能被某些高能榜统计计入。用户已确认接受此权衡。代码预留扩展点,可一键切到完整隐身。
-- **封号风险**:低。拦截是"不主动上报",非刷量。已知项目(BLTH 隐身入场自2023、BiLiveInvisible 自2024)无封号案例。
+- **亲密度**:当前 B 站网页版已无 `x25Kn` 接口,亲密度上报走 `data.bilivideo.com/log/web/`,已被本脚本拦截。隐身与亲密度上报同源,二者不可兼得——隐身后亲密度不涨是预期行为。
+- **进房广播的真正触发**:实测发现 op=7 的 uid 改 0 后主播仍看得到进房,根因是 `TrigerInteract` 接口主动触发广播(带 cookie,服务端据此识别登录用户),拦截此接口后才彻底隐身。
+- **封号风险**:低。拦截是"不主动上报",非刷量。
 - **风控风险**:接口可能返回 -352(针对IP,自动解除),非封号。
-- **cookie**:不需要用户手动提供。脚本注入页面运行,自动读取页面登录态。`roomEntryAction` 的 csrf token 来自 cookie `bili_jct`,页面请求自带,拦截后伪造响应无需构造 csrf。
+- **cookie**:不需要用户手动提供。脚本注入页面运行,自动读取页面登录态。
 
 ## 2. 架构
 

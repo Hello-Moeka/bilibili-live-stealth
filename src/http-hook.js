@@ -38,7 +38,7 @@ function wrapXhr(win, cfg, onIntercept) {
         onIntercept && onIntercept();
         const fake = fakeResponseText();
         // readyState/responseText 等是只读属性,直接赋值无效;
-        // 用 defineProperty 改成可写后再赋,再同步触发回调,让页面以为上报成功。
+        // 用 defineProperty 改成可写后再赋,再触发回调,让页面以为上报成功。
         const self = this;
         const props = ['readyState', 'status', 'responseText', 'response'];
         for (const p of props) {
@@ -48,6 +48,10 @@ function wrapXhr(win, cfg, onIntercept) {
         self.status = 200;
         self.responseText = fake;
         self.response = fake;
+        // 先派发 readystatechange 事件(覆盖 addEventListener 监听器)
+        try { self.dispatchEvent(new win.Event('readystatechange')); } catch (e) {}
+        // 再派发 load 事件 + 调 on* 属性回调,覆盖两种注册方式
+        try { self.dispatchEvent(new win.Event('load')); } catch (e) {}
         if (typeof self.onreadystatechange === 'function') {
           self.onreadystatechange();
         }
@@ -70,8 +74,17 @@ function wrapFetch(win, cfg, onIntercept) {
     if (cfg.getStealth() && shouldBlock(url)) {
       onIntercept && onIntercept();
       const text = fakeResponseText();
-      const res = new win.Response(text, { status: 200, headers: { 'content-type': 'application/json' } });
-      return Promise.resolve(res);
+      // 优先用原生 Response;无 Response 时用最小桩,保证返回 thenable
+      if (typeof win.Response === 'function') {
+        try {
+          return Promise.resolve(new win.Response(text, { status: 200, headers: { 'content-type': 'application/json' } }));
+        } catch (e) { /* 降级到桩 */ }
+      }
+      return Promise.resolve({
+        ok: true, status: 200, statusText: 'OK',
+        text: function () { return Promise.resolve(text); },
+        json: function () { return Promise.resolve(JSON.parse(text)); }
+      });
     }
     return Orig.apply(this, arguments);
   };

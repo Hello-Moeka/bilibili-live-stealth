@@ -45,10 +45,21 @@ describe('installHttpHook (XHR)', () => {
   // 桩 XHR:方法放 prototype 上(模拟真实浏览器结构),用闭包标志记录是否真发网络
   function stubXhr() {
     let realOpened = false;
-    function XHR() { this.readyState = 0; }
+    function XHR() {
+      this.readyState = 0;
+      this._listeners = {};
+    }
     XHR.prototype.open = function (m, u) { this._url = u; };
     XHR.prototype.send = function () { realOpened = true; /* 不真发 */ };
     XHR.prototype.setRequestHeader = function () {};
+    // 模拟 EventTarget:addEventListener/dispatchEvent
+    XHR.prototype.addEventListener = function (type, cb) {
+      (this._listeners[type] = this._listeners[type] || []).push(cb);
+    };
+    XHR.prototype.dispatchEvent = function (ev) {
+      const cbs = this._listeners[ev && ev.type] || [];
+      for (const cb of cbs) { try { cb(ev); } catch (e) {} }
+    };
     return { XHR, wasOpened: () => realOpened };
   }
 
@@ -85,6 +96,25 @@ describe('installHttpHook (XHR)', () => {
     xhr.send();
     assert.strictEqual(wasOpened(), true);
     assert.strictEqual(count, 0);
+  });
+
+  it('隐身开启:拦命中时触发 addEventListener("load") 监听器', (done) => {
+    const win = makeWin();
+    const { XHR, wasOpened } = stubXhr();
+    win.XMLHttpRequest = XHR;
+    const cfg = { getStealth: () => true };
+    installHttpHook(win, cfg, () => {});
+    const xhr = new win.XMLHttpRequest();
+    // 用 addEventListener 注册(而非 onload 属性),验证 dispatchEvent 触发
+    xhr.addEventListener('load', function () {
+      try {
+        assert.strictEqual(wasOpened(), false);
+        assert.strictEqual(JSON.parse(xhr.responseText).code, 0);
+        done();
+      } catch (e) { done(e); }
+    });
+    xhr.open('POST', 'https://api.live.bilibili.com/xlive/web-room/v1/index/TrigerInteract');
+    xhr.send();
   });
 });
 

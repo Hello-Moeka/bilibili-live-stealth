@@ -4,11 +4,14 @@
 
 ## 工作原理
 
-拦截两条通道:
+拦截三条通道(均经 B 站直播核心 bundle `blfe-live-room/app.js` 源码确认):
 
-- **HTTP**:`roomEntryAction`(进房上报)、`webHeartBeat`(在线心跳)被拦截并伪造成功响应,不真发。
-- **WebSocket**:弹幕连接的进房认证包(`op=7`)里的 `uid` 被改写为 `0`(游客),服务端不把你当登录用户广播入场提示;`op=2` 心跳照发维持连接。
-- **不拦** `x25Kn` 加密心跳 → 粉丝勋章亲密度照涨、小心心照拿。代价:理论上可能被某些高能榜统计计入。
+- **HTTP 进房上报** `api.live.bilibili.com/xlive/web-room/v1/index/roomEntryAction` —— 拦截,伪造成功响应不真发。
+- **HTTP 进房互动广播** `api.live.bilibili.com/xlive/web-room/v1/index/TrigerInteract` —— 拦截。这是触发"XXX进入直播间"广播的主动接口,带 cookie 调用,不拦则主播看得到进房。
+- **HTTP 在线心跳** `data.bilivideo.com/log/web/`(`te9Kl` 进房首包+签名校验、`s82Tq` 周期心跳)—— 拦截。注意:B 站已弃用旧文档里的 `live-trace.bilibili.com/xlive/rdata-interface/v1/heartbeat/webHeartBeat` 和 `x25Kn`,改用 `data.bilivideo.com`,故用域名+路径前缀宽匹配。
+- **WebSocket 进房认证** 弹幕连接的 op=7 认证包里的 `uid` 被改写为 `0`(游客);op=2 心跳照发维持连接、弹幕正常。
+
+不拦 `roomReportAction`(播放质量上报,与隐身无关)。`x25Kn` 加密心跳已不存在于当前前端,无需处理。
 
 ## 安装
 
@@ -33,7 +36,7 @@ node build.js    # 重新生成 .user.js(改 src 后)
 
 ## 权衡
 
-- **保留亲密度**:不拦 `x25Kn`,亲密度照涨,但可能上某些高能榜。要彻底隐身(丢亲密度)就把 `src/http-hook.js` 的 `BLOCKED_URLS` 加上 `x25Kn/E`、`x25Kn/X` 重新 build。
+- **亲密度**:当前 B 站网页版前端已无 `x25Kn` 加密心跳接口(源码确认),亲密度上报走 `data.bilivideo.com/log/web/`,已被本脚本拦截。若发现亲密度不涨是预期行为(隐身与亲密度上报同源,二者不可兼得)。
 - **封号风险低**:拦截是"不主动上报",非刷量。
 - **风控**:接口可能返回 -352(针对 IP,自动解除)。
 
