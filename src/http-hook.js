@@ -2,7 +2,7 @@
 
 // 阻断列表:命中则不真发,伪造成功响应(在线心跳,不需要服务端响应)
 const BLOCKED_URLS = [
-  'data.bilivideo.com/log/web/'   // 在线心跳:te9Kl(进房首包+签名校验)、s82Tq(周期心跳)
+  'data.bilivideo.com/log/web/' // 在线心跳:te9Kl(进房首包+签名校验)、s82Tq(周期心跳)
 ];
 
 // getInfoByUser 的 room_id 换成假号 27227:服务端以为你进假房间,不广播进房,但仍返回有效响应
