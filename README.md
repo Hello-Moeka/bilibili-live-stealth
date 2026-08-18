@@ -1,45 +1,53 @@
-# B站直播隐身观看 油猴脚本
+# B站直播隐身观看
 
-隐身看 B 站直播:主播看不到你进房,你不出现在在线人数/在线列表,同时**保留粉丝勋章亲密度**。右下角带开关。
+隐身看 B 站直播:主播看不到你进房,你不出现在在线列表,弹幕正常显示。装上即生效,无需配置。
 
 ## 工作原理
 
-拦截三条通道(均经 B 站直播核心 bundle `blfe-live-room/app.js` 源码确认):
+采用三段式隐身方案(参考 [哔哩直播隐身](https://greasyfork.org/zh-CN/scripts/581010) v1.2.2 的实现思路):
 
-- **HTTP 进房上报** `api.live.bilibili.com/xlive/web-room/v1/index/roomEntryAction` —— 拦截,伪造成功响应不真发。
-- **HTTP 进房互动广播** `api.live.bilibili.com/xlive/web-room/v1/index/TrigerInteract` —— 拦截。这是触发"XXX进入直播间"广播的主动接口,带 cookie 调用,不拦则主播看得到进房。
-- **HTTP 在线心跳** `data.bilivideo.com/log/web/`(`te9Kl` 进房首包+签名校验、`s82Tq` 周期心跳)—— 拦截。注意:B 站已弃用旧文档里的 `live-trace.bilibili.com/xlive/rdata-interface/v1/heartbeat/webHeartBeat` 和 `x25Kn`,改用 `data.bilivideo.com`,故用域名+路径前缀宽匹配。
-- **WebSocket 进房认证** 弹幕连接的 op=7 认证包里的 `uid` 被改写为 `0`(游客);op=2 心跳照发维持连接、弹幕正常。
+1. **`getInfoByUser` 换假房间号** — 把请求里的真实 `room_id` 替换成假号 `27227`,服务端以为你进的是假房间,不广播"XXX 进入直播间",但仍返回有效响应(页面不报错)。
+2. **`getDanmuInfo` 不带 cookie** — 弹幕 token 请求 `credentials: 'omit'`,拿游客 token,降低身份暴露。
+3. **WebSocket op=7 认证包 `uid` 改 0 + 弹幕脱敏修复** — uid 改 0 后服务端不把你当登录用户广播;但弹幕用户名会脱敏(变 `*`),脚本用 MutationObserver 监听弹幕容器,通过 history API 查回真实用户名补上。
+4. **在线心跳阻断** — `data.bilivideo.com/log/web/`(`te9Kl` 进房首包、`s82Tq` 周期心跳)被拦截并伪造成功响应,你不在在线人数/在线列表里。
 
-不拦 `roomReportAction`(播放质量上报,与隐身无关)。`x25Kn` 加密心跳已不存在于当前前端,无需处理。
+> 以上接口均经 B 站直播核心 bundle `blfe-live-room/app.js` 源码确认(2026-08-19)。旧文档里的 `live-trace.bilibili.com/.../webHeartBeat` 和 `x25Kn` 已废弃,当前前端不再调用。
 
 ## 安装
 
-1. 装 Tampermonkey 浏览器扩展。
-2. Tampermonkey → 新建脚本 → 粘贴 `bilibili-live-stealth.user.js` 全部内容 → 保存。
-3. 打开任意 B 站直播间,右下角出现"隐身 [开]"面板即生效。
+1. 安装 [Tampermonkey](https://www.tampermonkey.net/) 浏览器扩展。
+2. Tampermonkey → 新建脚本 → 粘贴 [`bilibili-live-stealth.user.js`](./bilibili-live-stealth.user.js) 全部内容 → 保存。
+3. 打开任意 B 站直播间,隐身自动生效。
 
-## 使用
+## 隐身效果
 
-- **默认隐身开启**。右下角点"隐身 [开]/[关]"或齿轮切换,立即生效,状态持久化(刷新后保持)。
-- "拦截: N 次"显示已拦截的进房/在线心跳数,数字增长说明脚本在干活。
+- ✅ 主播 / 房管看不到你进房(无"XXX 进入直播间"广播)
+- ✅ 不出现在在线人数 / 在线列表
+- ✅ 弹幕正常显示(真实用户名,非脱敏 `*`)
+- ⚠️ 亲密度不涨(隐身与亲密度上报同源,二者不可兼得)
+
+## 权衡
+
+- **亲密度**:当前 B 站网页版亲密度上报走 `data.bilivideo.com/log/web/`,已被拦截。隐身后亲密度不涨是预期行为。
+- **封号风险低**:拦截是"不主动上报" + "改参数",非刷量。
+- **风控**:接口可能返回 -352(针对 IP,自动解除)。
 
 ## 开发
 
 ```bash
 npm install      # 装依赖
-npm test         # 跑全部测试
+npm test         # 跑全部测试(21 个)
 node build.js    # 重新生成 .user.js(改 src 后)
 ```
 
-源码在 `src/`,测试在 `test/`,构建脚本 `build.js` 把 `src/*.js` 内联进 `bilibili-live-stealth.user.js`。
+源码在 `src/`(`http-hook.js` / `ws-hook.js`),测试在 `test/`,构建脚本 `build.js` 把 `src/*.js` 内联进 `bilibili-live-stealth.user.js`。
 
-## 权衡
+## License
 
-- **亲密度**:当前 B 站网页版前端已无 `x25Kn` 加密心跳接口(源码确认),亲密度上报走 `data.bilivideo.com/log/web/`,已被本脚本拦截。若发现亲密度不涨是预期行为(隐身与亲密度上报同源,二者不可兼得)。
-- **封号风险低**:拦截是"不主动上报",非刷量。
-- **风控**:接口可能返回 -352(针对 IP,自动解除)。
+MIT
 
-## 参考
+## 致谢
 
-设计文档:`docs/superpowers/specs/2026-08-19-bilibili-live-stealth-design.md`
+- 隐身方案参考 [哔哩直播隐身](https://greasyfork.org/zh-CN/scripts/581010) by moranjianghe
+- BLTH [andywang425/BLTH](https://github.com/andywang425/BLTH) 的隐身入场模块提供了 `getInfoByUser` 参数的线索
+- [bilibili-API-collect](https://github.com/SocialSisterYi/bilibili-API-collect) 的直播 API 文档

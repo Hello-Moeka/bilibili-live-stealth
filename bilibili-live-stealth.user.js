@@ -3,7 +3,7 @@
 // @namespace    https://github.com/local/bilibili-live-stealth
 // @version      2.0.0
 // @description  隐身看B站直播:主播看不到你进房,你不出现在在线列表,弹幕正常。
-// @author       anonymous
+// @author       Moeka
 // @match        *://live.bilibili.com/*
 // @run-at       document-start
 // @grant        unsafeWindow
