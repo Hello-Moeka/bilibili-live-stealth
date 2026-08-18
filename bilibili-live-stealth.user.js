@@ -43,56 +43,6 @@ module.exports = { createConfig };
     return module.exports;
   })();
 
-  var packet = (function () {
-    var module = { exports: {} };
-const HEADER_LEN = 16;
-
-// 解析一个 WS 包头;返回字段对象,或 null(数据不足/头不全)
-function parsePacket(buf) {
-  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
-  if (bytes.length < HEADER_LEN) return null;
-  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const packetLength = dv.getUint32(0);
-  const headerLength = dv.getUint16(4);
-  const protoVer = dv.getUint16(6);
-  const op = dv.getUint32(8);
-  const seq = dv.getUint32(12);
-  if (bytes.length < packetLength) return null;
-  const body = bytes.slice(headerLength, packetLength);
-  return { packetLength, headerLength, protoVer, op, seq, body };
-}
-
-// 拼一个 WS 包;body 可为 Uint8Array 或 string(按 UTF-8 编码)
-function buildPacket(op, body, protoVer = 1, seq = 1) {
-  const bodyBytes = body instanceof Uint8Array
-    ? body
-    : new TextEncoder().encode(String(body));
-  const total = HEADER_LEN + bodyBytes.length;
-  const out = new Uint8Array(total);
-  const dv = new DataView(out.buffer);
-  dv.setUint32(0, total);
-  dv.setUint16(4, HEADER_LEN);
-  dv.setUint16(6, protoVer);
-  dv.setUint32(8, op);
-  dv.setUint32(12, seq);
-  out.set(bodyBytes, HEADER_LEN);
-  return out;
-}
-
-// 把 body 当 UTF-8 JSON 解析;失败返回 null
-function bodyToJson(body) {
-  try {
-    const text = new TextDecoder('utf-8').decode(body);
-    return JSON.parse(text);
-  } catch (e) {
-    return null;
-  }
-}
-
-module.exports = { parsePacket, buildPacket, bodyToJson };
-    return module.exports;
-  })();
-
   var httpHook = (function () {
     var module = { exports: {} };
 const BLOCKED_URLS = [
@@ -222,16 +172,12 @@ function rewriteAuthPacket(buf, newUid) {
   try {
     const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
     const p = parsePacket(bytes);
-    if (!p) { console.log('[BLS-rewrite] parsePacket 返回 null'); return null; }
-    if (p.op !== 7) { console.log('[BLS-rewrite] op 不是7,是 ' + p.op); return null; }
+    if (!p || p.op !== 7) return null;
     const json = bodyToJson(p.body);
-    if (!json) { console.log('[BLS-rewrite] bodyToJson 返回 null, bodyLen=' + p.body.length); return null; }
-    if (!('uid' in json)) { console.log('[BLS-rewrite] body 无 uid 字段, keys=' + Object.keys(json)); return null; }
-    console.log('[BLS-rewrite] 找到 uid=' + json.uid + ' 即将改 ' + newUid);
+    if (!json || !('uid' in json)) return null;
     json.uid = newUid;
     return buildPacket(7, JSON.stringify(json), p.protoVer, p.seq);
   } catch (e) {
-    console.log('[BLS-rewrite] 异常: ' + e.message);
     return null;
   }
 }
@@ -243,40 +189,19 @@ function installWsHook(win, cfg, onIntercept) {
 
   const Proxied = new Proxy(Orig, {
     construct(target, args) {
-      console.log('[BLS] new WebSocket 被拦截, url=' + args[0]);
       const ws = Reflect.construct(target, args);
       const origSend = ws.send ? ws.send.bind(ws) : null;
       if (origSend) {
         ws.send = function (data) {
           try {
             if (cfg.getStealth()) {
-              // 全量诊断:打印 data 类型、长度、op、body、改写结果
-              let dtype = Object.prototype.toString.call(data);
-              let dlen = (data && data.byteLength != null) ? data.byteLength : (data && data.length != null) ? data.length : -1;
-              let opStr = '?', bodyText = '';
-              try {
-                let bytes;
-                if (data instanceof Uint8Array) bytes = data;
-                else if (data instanceof ArrayBuffer) bytes = new Uint8Array(data);
-                else if (data && data.buffer && ArrayBuffer.isView(data)) bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
-                if (bytes && bytes.length >= 16) {
-                  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-                  opStr = String(dv.getUint32(8));
-                  bodyText = new TextDecoder('utf-8').decode(bytes.slice(16, dv.getUint32(0))).slice(0, 200);
-                }
-              } catch(e) { bodyText = '解析异常:' + e.message; }
-              console.log('[BLS] ws.send type=' + dtype + ' len=' + dlen + ' op=' + opStr + ' body=' + bodyText);
-
               const rewritten = rewriteAuthPacket(data, 0);
               if (rewritten) {
-                console.log('[BLS] op=7 已改写 uid=0 ✓');
                 onIntercept && onIntercept();
                 return origSend(rewritten);
-              } else {
-                console.log('[BLS] 改写返回 null(原样透传)');
               }
             }
-          } catch (e) { console.warn('[BLS] WS hook 异常', e); /* 任何异常原样透传 */ }
+          } catch (e) { /* 任何异常原样透传 */ }
           return origSend(data);
         };
       }
@@ -363,10 +288,6 @@ module.exports = { installUi };
 
 
   var win = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
-  console.log('[BLS] 脚本启动, 模块导出检查:', {
-    config: typeof config.createConfig, packet: typeof packet.parsePacket,
-    httpHook: typeof httpHook.installHttpHook, wsHook: typeof wsHook.installWsHook, ui: typeof ui.installUi
-  });
 
   // 存储后端:优先 GM_*,无则降级 localStorage
   var storage = (typeof GM_setValue !== 'undefined' && typeof GM_getValue !== 'undefined')
@@ -378,13 +299,12 @@ module.exports = { installUi };
   var onIntercept = function () { interceptCount++; };
 
   var cfg = config.createConfig(storage);
-  console.log('[BLS] config 创建成功, stealth=' + cfg.getStealth());
 
-  try { httpHook.installHttpHook(win, cfg, onIntercept); console.log('[BLS] HTTP hook 已装'); } catch (e) { console.warn('[BLS] HTTP hook 失败', e); }
-  try { wsHook.installWsHook(win, cfg, onIntercept); console.log('[BLS] WS hook 已装, win.WebSocket 被代理?', win.WebSocket !== win.WebSocket.constructor.prototype.constructor); } catch (e) { console.warn('[BLS] WS hook 失败', e); }
+  try { httpHook.installHttpHook(win, cfg, onIntercept); } catch (e) { console.warn('[BLS] HTTP hook 失败', e); }
+  try { wsHook.installWsHook(win, cfg, onIntercept); } catch (e) { console.warn('[BLS] WS hook 失败', e); }
 
   function startUi() {
-    try { ui.installUi(win, cfg, function () { return interceptCount; }); console.log('[BLS] UI 已注入'); } catch (e) { console.warn('[BLS] UI 失败', e); }
+    try { ui.installUi(win, cfg, function () { return interceptCount; }); } catch (e) { console.warn('[BLS] UI 失败', e); }
   }
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', startUi);
