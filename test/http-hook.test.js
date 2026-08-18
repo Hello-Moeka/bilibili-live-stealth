@@ -4,22 +4,24 @@ const { JSDOM } = require('jsdom');
 const { shouldBlock, fakeResponseText, installHttpHook, BLOCKED_URLS } = require('../src/http-hook.js');
 
 describe('shouldBlock', () => {
-  it('拦 roomEntryAction', () => {
+  it('拦 roomEntryAction(进房上报)', () => {
     assert.strictEqual(shouldBlock('https://api.live.bilibili.com/xlive/web-room/v1/index/roomEntryAction?room_id=1'), true);
   });
-  it('拦 webHeartBeat', () => {
-    assert.strictEqual(shouldBlock('https://live-trace.bilibili.com/xlive/rdata-interface/v1/heartbeat/webHeartBeat?hb=xx'), true);
+  it('拦 data.bilivideo.com/log/web/ 周期心跳 s82Tq', () => {
+    assert.strictEqual(shouldBlock('https://data.bilivideo.com/log/web/s82Tq'), true);
   });
-  it('放行 x25Kn(保留亲密度)', () => {
-    assert.strictEqual(shouldBlock('https://live-trace.bilibili.com/xlive/data-interface/v1/x25Kn/X'), false);
+  it('拦 data.bilivideo.com/log/web/ 进房首包 te9Kl', () => {
+    assert.strictEqual(shouldBlock('https://data.bilivideo.com/log/web/te9Kl'), true);
+  });
+  it('放行 roomReportAction(播放质量上报,与隐身无关)', () => {
+    assert.strictEqual(shouldBlock('https://api.live.bilibili.com/xlive/web-room/v1/index/roomReportAction'), false);
   });
   it('放行无关请求', () => {
     assert.strictEqual(shouldBlock('https://api.bilibili.com/x/web-interface/view'), false);
   });
-  it('BLOCKED_URLS 含 roomEntryAction 与 webHeartBeat,不含 x25Kn', () => {
+  it('BLOCKED_URLS 含 roomEntryAction 与 data.bilivideo.com/log/web/', () => {
     assert.ok(BLOCKED_URLS.some(u => u.includes('roomEntryAction')));
-    assert.ok(BLOCKED_URLS.some(u => u.includes('webHeartBeat')));
-    assert.ok(!BLOCKED_URLS.some(u => u.includes('x25Kn')));
+    assert.ok(BLOCKED_URLS.some(u => u.includes('data.bilivideo.com/log/web/')));
   });
 });
 
@@ -93,7 +95,7 @@ describe('installHttpHook (fetch)', () => {
     Response.prototype.text = function () { return Promise.resolve(this._text); };
     return Response;
   }
-  it('隐身开启:拦 webHeartBeat,返回伪造 Response', async () => {
+  it('隐身开启:拦周期心跳 s82Tq,返回伪造 Response', async () => {
     const win = makeWin();
     win.Response = stubResponse();
     let realCalled = false;
@@ -101,7 +103,7 @@ describe('installHttpHook (fetch)', () => {
     const cfg = { getStealth: () => true };
     let count = 0;
     installHttpHook(win, cfg, () => { count++; });
-    const res = await win.fetch('https://live-trace.bilibili.com/xlive/rdata-interface/v1/heartbeat/webHeartBeat?hb=x');
+    const res = await win.fetch('https://data.bilivideo.com/log/web/s82Tq');
     assert.strictEqual(realCalled, false);
     assert.strictEqual(count, 1);
     const text = await res.text();

@@ -96,8 +96,8 @@ module.exports = { parsePacket, buildPacket, bodyToJson };
   var httpHook = (function () {
     var module = { exports: {} };
 const BLOCKED_URLS = [
-  '/xlive/web-room/v1/index/roomEntryAction',
-  '/xlive/rdata-interface/v1/heartbeat/webHeartBeat'
+  '/xlive/web-room/v1/index/roomEntryAction',   // 进房上报
+  'data.bilivideo.com/log/web/'                  // 在线心跳:te9Kl(进房首包+签名校验)、s82Tq(周期心跳)。用域名+路径前缀宽匹配,覆盖加密路径名
 ];
 
 function shouldBlock(url) {
