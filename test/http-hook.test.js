@@ -7,6 +7,9 @@ describe('shouldBlock', () => {
   it('拦 roomEntryAction(进房上报)', () => {
     assert.strictEqual(shouldBlock('https://api.live.bilibili.com/xlive/web-room/v1/index/roomEntryAction?room_id=1'), true);
   });
+  it('拦 TrigerInteract(触发进房互动广播)', () => {
+    assert.strictEqual(shouldBlock('https://api.live.bilibili.com/xlive/web-room/v1/index/TrigerInteract'), true);
+  });
   it('拦 data.bilivideo.com/log/web/ 周期心跳 s82Tq', () => {
     assert.strictEqual(shouldBlock('https://data.bilivideo.com/log/web/s82Tq'), true);
   });
@@ -19,8 +22,9 @@ describe('shouldBlock', () => {
   it('放行无关请求', () => {
     assert.strictEqual(shouldBlock('https://api.bilibili.com/x/web-interface/view'), false);
   });
-  it('BLOCKED_URLS 含 roomEntryAction 与 data.bilivideo.com/log/web/', () => {
+  it('BLOCKED_URLS 含 roomEntryAction、TrigerInteract、data.bilivideo.com/log/web/', () => {
     assert.ok(BLOCKED_URLS.some(u => u.includes('roomEntryAction')));
+    assert.ok(BLOCKED_URLS.some(u => u.includes('TrigerInteract')));
     assert.ok(BLOCKED_URLS.some(u => u.includes('data.bilivideo.com/log/web/')));
   });
 });
