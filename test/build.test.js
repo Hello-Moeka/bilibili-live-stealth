@@ -13,10 +13,12 @@ describe('build', () => {
     assert.ok(content.includes('// ==UserScript=='), '应有元数据头');
     assert.ok(content.includes('@run-at       document-start'), '应在 document-start 注入');
     assert.ok(content.includes('@match        *://live.bilibili.com/*'), '应匹配直播页');
+    assert.ok(content.includes('@grant        unsafeWindow'), '应 grant unsafeWindow');
+    assert.ok(!content.includes('@grant        GM_setValue'), '不应再有 GM_setValue(无开关)');
     assert.ok(content.includes('installHttpHook'), '应内联 HTTP hook');
     assert.ok(content.includes('installWsHook'), '应内联 WS hook');
-    assert.ok(content.includes('installUi'), '应内联 UI');
-    assert.ok(content.includes('createConfig'), '应内联 config');
+    assert.ok(!content.includes('installUi'), '不应再有 UI 模块');
+    assert.ok(!content.includes('createConfig'), '不应再有 config 开关模块');
     assert.ok(content.includes('unsafeWindow'), '入口应用 unsafeWindow');
   });
 });

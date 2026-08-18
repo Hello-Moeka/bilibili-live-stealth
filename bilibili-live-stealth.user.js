@@ -1,48 +1,16 @@
 // ==UserScript==
 // @name         B站直播隐身观看
 // @namespace    https://github.com/local/bilibili-live-stealth
-// @version      1.0.0
-// @description  隐身看B站直播:主播看不到你进房,你不出现在在线列表,保留粉丝勋章亲密度。带右下角开关。
+// @version      2.0.0
+// @description  隐身看B站直播:主播看不到你进房,你不出现在在线列表,弹幕正常。
 // @author       anonymous
 // @match        *://live.bilibili.com/*
-// @match        *://live.bilibili.com/blanc/*
 // @run-at       document-start
 // @grant        unsafeWindow
-// @grant        GM_setValue
-// @grant        GM_getValue
 // ==/UserScript==
 
 (function () {
   'use strict';
-  var config = (function () {
-    var module = { exports: {} };
-const KEY = 'bls_stealth';
-const DEFAULT = true;
-
-// storage: { getValue(key, default), setValue(key, value) }
-function createConfig(storage) {
-  let stealth = storage.getValue(KEY, DEFAULT);
-  const listeners = [];
-
-  return {
-    getStealth() { return stealth; },
-    setStealth(v) {
-      const b = !!v;
-      if (b === stealth) return;
-      stealth = b;
-      storage.setValue(KEY, b);
-      for (const cb of listeners) {
-        try { cb(b); } catch (e) { /* 回调失败不影响状态 */ }
-      }
-    },
-    onChange(cb) { listeners.push(cb); }
-  };
-}
-
-module.exports = { createConfig };
-    return module.exports;
-  })();
-
   var httpHook = (function () {
     var module = { exports: {} };
 // 阻断列表:命中则不真发,伪造成功响应(在线心跳,不需要服务端响应)
@@ -302,104 +270,19 @@ function installWsHook(win, cfg, onIntercept) {
   win.WebSocket = Proxied;
 }
 
-module.exports = { rewriteAuthPacket, installWsHook };
-    return module.exports;
-  })();
-
-  var ui = (function () {
-    var module = { exports: {} };
-function installUi(win, cfg, getInterceptCount) {
-  const doc = win.document;
-  if (!doc || !doc.body) {
-    // body 还没就绪,等 DOMContentLoaded
-    doc.addEventListener('DOMContentLoaded', () => inject(win, cfg, getInterceptCount), { once: true });
-    return;
-  }
-  inject(win, cfg, getInterceptCount);
-}
-
-function inject(win, cfg, getInterceptCount) {
-  const doc = win.document;
-  if (doc.querySelector('#bls-panel')) return; // 防重复
-
-  const panel = doc.createElement('div');
-  panel.id = 'bls-panel';
-  panel.setAttribute('style', [
-    'position:fixed', 'right:16px', 'bottom:16px', 'z-index:2147483647',
-    'padding:8px 12px', 'background:rgba(30,30,35,0.9)', 'color:#fff',
-    'border-radius:8px', 'font:12px/1.5 sans-serif', 'box-shadow:0 2px 8px rgba(0,0,0,0.4)',
-    'cursor:default', 'user-select:none', 'border:1px solid rgba(255,255,255,0.15)'
-  ].join(';') + ';');
-
-  const status = doc.createElement('span');
-  status.id = 'bls-status';
-  status.textContent = cfg.getStealth() ? '隐身 [开]' : '隐身 [关]';
-  status.style.cursor = 'pointer';
-  status.style.marginRight = '8px';
-
-  const toggle = doc.createElement('span');
-  toggle.id = 'bls-toggle';
-  toggle.textContent = '⚙';
-  toggle.style.cursor = 'pointer';
-  toggle.title = '点击切换隐身开关';
-
-  const countLine = doc.createElement('div');
-  countLine.id = 'bls-count';
-  countLine.style.fontSize = '11px';
-  countLine.style.opacity = '0.8';
-  countLine.textContent = '拦截: ' + getInterceptCount() + ' 次';
-
-  // 点击状态或齿轮都切换
-  function onToggle() {
-    cfg.setStealth(!cfg.getStealth());
-  }
-  status.addEventListener('click', onToggle);
-  toggle.addEventListener('click', onToggle);
-
-  // 状态变化时刷新显示
-  cfg.onChange((v) => {
-    status.textContent = v ? '隐身 [开]' : '隐身 [关]';
-  });
-
-  // 周期刷新计数
-  setInterval(() => {
-    countLine.textContent = '拦截: ' + getInterceptCount() + ' 次';
-  }, 2000);
-
-  panel.appendChild(status);
-  panel.appendChild(toggle);
-  panel.appendChild(countLine);
-  doc.body.appendChild(panel);
-}
-
-module.exports = { installUi };
+module.exports = { rewriteAuthPacket, installWsHook, parsePacket, buildPacket, bodyToJson };
     return module.exports;
   })();
 
 
   var win = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
 
-  // 存储后端:优先 GM_*,无则降级 localStorage
-  var storage = (typeof GM_setValue !== 'undefined' && typeof GM_getValue !== 'undefined')
-    ? { getValue: function (k, d) { return GM_getValue(k, d); }, setValue: function (k, v) { GM_setValue(k, v); } }
-    : { getValue: function (k, d) { try { var s = localStorage.getItem(k); return s === null ? d : JSON.parse(s); } catch (e) { return d; } },
-        setValue: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
-
+  // 隐身恒开,无需开关
+  var cfg = { getStealth: function () { return true; } };
   var interceptCount = 0;
   var onIntercept = function () { interceptCount++; };
 
-  var cfg = config.createConfig(storage);
-
   try { httpHook.installHttpHook(win, cfg, onIntercept); } catch (e) { console.warn('[BLS] HTTP hook 失败', e); }
   try { wsHook.installWsHook(win, cfg, onIntercept); } catch (e) { console.warn('[BLS] WS hook 失败', e); }
-
-  function startUi() {
-    try { ui.installUi(win, cfg, function () { return interceptCount; }); } catch (e) { console.warn('[BLS] UI 失败', e); }
-  }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', startUi);
-  } else {
-    startUi();
-  }
 
 })();

@@ -1,8 +1,7 @@
 'use strict';
 const assert = require('assert');
 const { JSDOM } = require('jsdom');
-const { rewriteAuthPacket, installWsHook } = require('../src/ws-hook.js');
-const { buildPacket, parsePacket, bodyToJson } = require('../src/packet.js');
+const { rewriteAuthPacket, installWsHook, buildPacket, parsePacket, bodyToJson } = require('../src/ws-hook.js');
 const enc = new TextEncoder();
 
 describe('rewriteAuthPacket', () => {

@@ -13,7 +13,7 @@ function loadModule(name) {
   return { name, src };
 }
 
-const moduleNames = ['config.js', 'http-hook.js', 'ws-hook.js', 'ui.js'];
+const moduleNames = ['http-hook.js', 'ws-hook.js'];
 const mods = moduleNames.map(loadModule);
 
 // 用 IIFE 把各模块包起来,把 module.exports 返回值赋给按文件名命名的全局变量
@@ -29,43 +29,25 @@ const wrapped = mods.map(m => {
 const header = `// ==UserScript==
 // @name         B站直播隐身观看
 // @namespace    https://github.com/local/bilibili-live-stealth
-// @version      1.0.0
-// @description  隐身看B站直播:主播看不到你进房,你不出现在在线列表,保留粉丝勋章亲密度。带右下角开关。
+// @version      2.0.0
+// @description  隐身看B站直播:主播看不到你进房,你不出现在在线列表,弹幕正常。
 // @author       anonymous
 // @match        *://live.bilibili.com/*
-// @match        *://live.bilibili.com/blanc/*
 // @run-at       document-start
 // @grant        unsafeWindow
-// @grant        GM_setValue
-// @grant        GM_getValue
 // ==/UserScript==
 `;
 
 const entry = `
   var win = (typeof unsafeWindow !== 'undefined') ? unsafeWindow : window;
 
-  // 存储后端:优先 GM_*,无则降级 localStorage
-  var storage = (typeof GM_setValue !== 'undefined' && typeof GM_getValue !== 'undefined')
-    ? { getValue: function (k, d) { return GM_getValue(k, d); }, setValue: function (k, v) { GM_setValue(k, v); } }
-    : { getValue: function (k, d) { try { var s = localStorage.getItem(k); return s === null ? d : JSON.parse(s); } catch (e) { return d; } },
-        setValue: function (k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) {} } };
-
+  // 隐身恒开,无需开关
+  var cfg = { getStealth: function () { return true; } };
   var interceptCount = 0;
   var onIntercept = function () { interceptCount++; };
 
-  var cfg = config.createConfig(storage);
-
   try { httpHook.installHttpHook(win, cfg, onIntercept); } catch (e) { console.warn('[BLS] HTTP hook 失败', e); }
   try { wsHook.installWsHook(win, cfg, onIntercept); } catch (e) { console.warn('[BLS] WS hook 失败', e); }
-
-  function startUi() {
-    try { ui.installUi(win, cfg, function () { return interceptCount; }); } catch (e) { console.warn('[BLS] UI 失败', e); }
-  }
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', startUi);
-  } else {
-    startUi();
-  }
 `;
 
 const out = header + '\n(function () {\n  \'use strict\';\n' + wrapped + '\n\n' + entry + '\n})();\n';

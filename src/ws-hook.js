@@ -151,4 +151,4 @@ function installWsHook(win, cfg, onIntercept) {
   win.WebSocket = Proxied;
 }
 
-module.exports = { rewriteAuthPacket, installWsHook };
+module.exports = { rewriteAuthPacket, installWsHook, parsePacket, buildPacket, bodyToJson };
