@@ -6,11 +6,8 @@ const path = require('path');
 function loadModule(name) {
   let src = fs.readFileSync(path.join(__dirname, 'src', name), 'utf8');
   src = src.replace(/^['"]use strict['"];\s*/, '');
-  // 去掉 module.exports = {...}; 尾部
-  const exportMatch = src.match(/module\.exports\s*=\s*(\{[\s\S]*?\});?\s*$/);
-  if (exportMatch) {
-    src = src.slice(0, exportMatch.index);
-  }
+  // 保留 module.exports = {...}; —— IIFE 内有 var module = { exports: {} },
+  // 这行会把模块函数挂到 module.exports,return module.exports 才有内容。
   // 去掉 require('./xxx') 行(跨模块依赖靠同 IIFE 内变量提升)
   src = src.replace(/const\s+\{[^}]*\}\s*=\s*require\(['"]\.\/[^'"]+['"]\);?\s*/g, '');
   return { name, src };

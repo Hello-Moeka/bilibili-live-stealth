@@ -36,12 +36,17 @@ function wrapXhr(win, cfg, onIntercept) {
       try {
         onIntercept && onIntercept();
         const fake = fakeResponseText();
-        // 伪造 readyState 与响应,触发回调
-        this.readyState = 4;
-        this.status = 200;
-        this.responseText = fake;
-        this.response = fake;
+        // readyState/responseText 等是只读属性,直接赋值无效;
+        // 用 defineProperty 改成可写后再赋,再同步触发回调,让页面以为上报成功。
         const self = this;
+        const props = ['readyState', 'status', 'responseText', 'response'];
+        for (const p of props) {
+          try { Object.defineProperty(self, p, { configurable: true, writable: true }); } catch (e) {}
+        }
+        self.readyState = 4;
+        self.status = 200;
+        self.responseText = fake;
+        self.response = fake;
         if (typeof self.onreadystatechange === 'function') {
           self.onreadystatechange();
         }
