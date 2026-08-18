@@ -199,30 +199,37 @@ function installWsHook(win, cfg, onIntercept) {
 
   const Proxied = new Proxy(Orig, {
     construct(target, args) {
+      console.log('[BLS] new WebSocket 被拦截, url=' + args[0]);
       const ws = Reflect.construct(target, args);
       const origSend = ws.send ? ws.send.bind(ws) : null;
       if (origSend) {
         ws.send = function (data) {
           try {
             if (cfg.getStealth()) {
-              // 诊断:打印所有 send 的包 op 与原始内容(帮助定位进房包结构)
-              const bytes = data instanceof Uint8Array ? data : (data && ArrayBuffer.isView(data)) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : null;
-              if (bytes && bytes.length >= 16) {
-                const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-                const op = dv.getUint32(8);
-                if (op === 7 || op === 2) {
-                  let bodyText = '';
-                  try { bodyText = new TextDecoder('utf-8').decode(bytes.slice(16, dv.getUint32(0))); } catch(e){}
-                  console.log('[BLS] WS send op=' + op + ' len=' + bytes.length + ' body=' + bodyText.slice(0, 300));
+              // 全量诊断:打印 data 类型、长度、op、body、改写结果
+              let dtype = Object.prototype.toString.call(data);
+              let dlen = (data && data.byteLength != null) ? data.byteLength : (data && data.length != null) ? data.length : -1;
+              let opStr = '?', bodyText = '';
+              try {
+                let bytes;
+                if (data instanceof Uint8Array) bytes = data;
+                else if (data instanceof ArrayBuffer) bytes = new Uint8Array(data);
+                else if (data && data.buffer && ArrayBuffer.isView(data)) bytes = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
+                if (bytes && bytes.length >= 16) {
+                  const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+                  opStr = String(dv.getUint32(8));
+                  bodyText = new TextDecoder('utf-8').decode(bytes.slice(16, dv.getUint32(0))).slice(0, 200);
                 }
-              }
+              } catch(e) { bodyText = '解析异常:' + e.message; }
+              console.log('[BLS] ws.send type=' + dtype + ' len=' + dlen + ' op=' + opStr + ' body=' + bodyText);
+
               const rewritten = rewriteAuthPacket(data, 0);
               if (rewritten) {
-                console.log('[BLS] op=7 已改写 uid=0');
+                console.log('[BLS] op=7 已改写 uid=0 ✓');
                 onIntercept && onIntercept();
                 return origSend(rewritten);
               } else {
-                console.log('[BLS] op=7 改写返回 null(原样透传,可能包结构已变)');
+                console.log('[BLS] 改写返回 null(原样透传)');
               }
             }
           } catch (e) { console.warn('[BLS] WS hook 异常', e); /* 任何异常原样透传 */ }
