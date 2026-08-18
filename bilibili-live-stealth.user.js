@@ -205,13 +205,27 @@ function installWsHook(win, cfg, onIntercept) {
         ws.send = function (data) {
           try {
             if (cfg.getStealth()) {
+              // 诊断:打印所有 send 的包 op 与原始内容(帮助定位进房包结构)
+              const bytes = data instanceof Uint8Array ? data : (data && ArrayBuffer.isView(data)) ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : null;
+              if (bytes && bytes.length >= 16) {
+                const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+                const op = dv.getUint32(8);
+                if (op === 7 || op === 2) {
+                  let bodyText = '';
+                  try { bodyText = new TextDecoder('utf-8').decode(bytes.slice(16, dv.getUint32(0))); } catch(e){}
+                  console.log('[BLS] WS send op=' + op + ' len=' + bytes.length + ' body=' + bodyText.slice(0, 300));
+                }
+              }
               const rewritten = rewriteAuthPacket(data, 0);
               if (rewritten) {
+                console.log('[BLS] op=7 已改写 uid=0');
                 onIntercept && onIntercept();
                 return origSend(rewritten);
+              } else {
+                console.log('[BLS] op=7 改写返回 null(原样透传,可能包结构已变)');
               }
             }
-          } catch (e) { /* 任何异常原样透传 */ }
+          } catch (e) { console.warn('[BLS] WS hook 异常', e); /* 任何异常原样透传 */ }
           return origSend(data);
         };
       }
