@@ -99,4 +99,42 @@ describe('installWsHook', () => {
     ws.send('hello');
     assert.strictEqual(ws._sent[0], 'hello');
   });
+
+  it('history 首次未包含目标弹幕时，后续响应出现后应恢复用户名', async () => {
+    const win = makeWin();
+    win.WebSocket = stubWebSocket();
+    win.__blsHistoryApi = 'https://api.live.bilibili.com/history';
+    win.document.body.innerHTML = '<div id="chat-items"></div>';
+
+    let requests = 0;
+    win.XMLHttpRequest = class {
+      open() {}
+      send() {
+        const response = requests++ === 0
+          ? { code: 0, data: { room: [] } }
+          : { code: 0, data: { room: [{ check_info: { ct: 'target-ct' }, nickname: '真实用户名', uid: 123 }] } };
+        this.status = 200;
+        this.readyState = 4;
+        this.responseText = JSON.stringify(response);
+        this.onreadystatechange();
+      }
+    };
+
+    installWsHook(win, { getStealth: () => true }, () => {});
+    new win.WebSocket('wss://x/sub');
+
+    const danmaku = win.document.createElement('div');
+    danmaku.className = 'danmaku-item';
+    danmaku.setAttribute('data-ct', 'target-ct');
+    danmaku.setAttribute('data-a', '1');
+    danmaku.setAttribute('data-b', '2');
+    danmaku.setAttribute('data-c', '3');
+    danmaku.setAttribute('data-uid', '0');
+    danmaku.innerHTML = '<span class="user-name">*** : </span>';
+    win.document.getElementById('chat-items').appendChild(danmaku);
+
+    await new Promise(resolve => setTimeout(resolve, 1100));
+    assert.strictEqual(danmaku.querySelector('.user-name').textContent, '真实用户名 : ');
+    assert.strictEqual(requests, 2);
+  });
 });

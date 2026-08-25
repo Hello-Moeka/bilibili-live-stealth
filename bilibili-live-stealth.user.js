@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站直播隐身观看
 // @namespace    https://github.com/local/bilibili-live-stealth
-// @version      2.1.0
+// @version      2.0.0
 // @description  隐身看B站直播:主播看不到你进房,你不出现在在线列表,弹幕正常。
 // @author       Moeka
 // @match        *://live.bilibili.com/*
@@ -174,7 +174,7 @@ function rewriteAuthPacket(buf, newUid) {
 }
 
 // 弹幕脱敏修复:uid=0 会让收到的弹幕用户名脱敏(变*),用 history API 查回真实用户名补上
-// history API 返回整房近期弹幕列表,多条脱敏弹幕共享一次请求结果,缓存 60 秒,请求级别重试。
+  // history API 返回整房近期弹幕列表,多条脱敏弹幕共享一次请求结果,缓存 60 秒,请求级别重试。目标 ct 延迟出现时会短暂刷新缓存。
 function startDanmakuRepair(win, getHistoryApi) {
   const doc = win.document;
 
@@ -229,11 +229,12 @@ function startDanmakuRepair(win, getHistoryApi) {
   }
 
   // 取 ctMap:缓存命中则直接返回;否则发一次请求,进行中的请求被多条弹幕复用(批量)。
-  function getHistoryMap() {
+  // forceRefresh 仅用于目标 ct 尚未写入 history 列表的短暂窗口，跳过旧缓存强制刷新。
+  function getHistoryMap(forceRefresh) {
     const api = getHistoryApi();
     if (!api) return Promise.resolve(null);
     // 缓存命中:同时校验 TTL 与 API URL(房间切换会让 __blsHistoryApi 变化,旧缓存作废)
-    if (historyCache && historyCache.api === api && Date.now() - historyCache.timestamp < HISTORY_CACHE_TTL) {
+    if (!forceRefresh && historyCache && historyCache.api === api && Date.now() - historyCache.timestamp < HISTORY_CACHE_TTL) {
       return Promise.resolve(historyCache.ctMap);
     }
     // 失败冷却期内不再发请求
@@ -253,13 +254,19 @@ function startDanmakuRepair(win, getHistoryApi) {
   }
 
   // 修复单条脱敏弹幕:从缓存/批量请求的 ctMap 中按 data-ct 查找真实昵称/uid
-  function reviseDanmakuName(el) {
-    getHistoryMap().then(function (ctMap) {
+  function reviseDanmakuName(el, retry) {
+    retry = retry || 0;
+    getHistoryMap(retry > 0).then(function (ctMap) {
       if (!ctMap) return;
       const ct = el.getAttribute('data-ct');
       if (ct == null || ct.length === 0) return;
       const info = ctMap.get(ct);
-      if (!info) return; // 未出现在 history 列表中:不再按弹幕级别重试,等待缓存刷新后命中
+      if (!info) {
+        if (retry < HISTORY_MAX_RETRY) {
+          setTimeout(function () { reviseDanmakuName(el, retry + 1); }, HISTORY_RETRY_INTERVAL);
+        }
+        return;
+      }
       const attrs = el.getAttributeNames();
       if (attrs[1]) el.setAttribute(attrs[1], info.name);
       if (attrs[5]) el.setAttribute(attrs[5], info.uid);
