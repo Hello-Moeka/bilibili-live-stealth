@@ -42,9 +42,9 @@ node build.js    # 重新生成 .user.js(改 src 后)
 
 源码在 `src/`(`http-hook.js` / `ws-hook.js`),测试在 `test/`,构建脚本 `build.js` 把 `src/*.js` 内联进 `bilibili-live-stealth.user.js`。
 
-## License
+## 许可证
 
-MIT
+本项目基于 [GPL-3.0](LICENSE) 协议开源。
 
 ## 致谢
 
