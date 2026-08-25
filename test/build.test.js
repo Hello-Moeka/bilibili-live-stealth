@@ -11,6 +11,8 @@ describe('build', () => {
     assert.ok(fs.existsSync(file), '应生成 user.js');
     const content = fs.readFileSync(file, 'utf8');
     assert.ok(content.includes('// ==UserScript=='), '应有元数据头');
+    const packageVersion = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf8')).version;
+    assert.ok(content.includes(`@version      ${packageVersion}`), '油猴元数据版本应与 package.json 一致');
     assert.ok(content.includes('@run-at       document-start'), '应在 document-start 注入');
     assert.ok(content.includes('@match        *://live.bilibili.com/*'), '应匹配直播页');
     assert.ok(content.includes('@grant        unsafeWindow'), '应 grant unsafeWindow');

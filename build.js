@@ -26,10 +26,12 @@ const wrapped = mods.map(m => {
   return '  var ' + varName + ' = (function () {\n    var module = { exports: {} };\n' + m.src + '\n    return module.exports;\n  })();';
 }).join('\n\n');
 
+const packageVersion = JSON.parse(fs.readFileSync(path.join(__dirname, 'package.json'), 'utf8')).version;
+
 const header = `// ==UserScript==
 // @name         B站直播隐身观看
 // @namespace    https://github.com/local/bilibili-live-stealth
-// @version      2.0.0
+// @version      ${packageVersion}
 // @description  隐身看B站直播:主播看不到你进房,你不出现在在线列表,弹幕正常。
 // @author       Moeka
 // @match        *://live.bilibili.com/*

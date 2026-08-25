@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站直播隐身观看
 // @namespace    https://github.com/local/bilibili-live-stealth
-// @version      2.0.0
+// @version      2.1.1
 // @description  隐身看B站直播:主播看不到你进房,你不出现在在线列表,弹幕正常。
 // @author       Moeka
 // @match        *://live.bilibili.com/*
