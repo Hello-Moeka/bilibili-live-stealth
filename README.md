@@ -44,7 +44,7 @@ node build.js    # 重新生成 .user.js(改 src 后)
 
 ## 许可证
 
-本项目基于 [GPL-3.0](LICENSE) 协议开源。
+本项目基于 [AGPL-3.0](LICENSE) 协议开源。
 
 ## 致谢
 
