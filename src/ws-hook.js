@@ -84,6 +84,9 @@ function startDanmakuRepair(win, getHistoryApi) {
       let xhr;
       try { xhr = new win.XMLHttpRequest(); } catch (e) { return retryOrFail(); }
       xhr.open('GET', api);
+      // api.live.bilibili.com 与 live.bilibili.com 不同源，XHR 默认不带 Cookie。
+      // 匿名 gethistory 可能返回 code=0 但 room=[]，无法补回匿名 WS 的昵称。
+      xhr.withCredentials = true;
       xhr.onreadystatechange = function () {
         if (xhr.readyState !== 4) return;
         let ctMap = null;
@@ -148,9 +151,8 @@ function startDanmakuRepair(win, getHistoryApi) {
         }
         return;
       }
-      const attrs = el.getAttributeNames();
-      if (attrs[1]) el.setAttribute(attrs[1], info.name);
-      if (attrs[5]) el.setAttribute(attrs[5], info.uid);
+      el.setAttribute('data-uname', info.name);
+      el.setAttribute('data-uid', String(info.uid));
       const name = el.getElementsByClassName('user-name')[0];
       if (name) name.textContent = info.name + ' : ';
     });
@@ -166,8 +168,7 @@ function startDanmakuRepair(win, getHistoryApi) {
             if (!el || !el.classList || !el.classList.value || !el.classList.value.includes('danmaku')) return;
             const ct = el.getAttribute('data-ct');
             if (ct != null && ct.length === 0) el.style.display = 'none';
-            const attrs = el.getAttributeNames();
-            if (attrs[5] && el.getAttribute(attrs[5]) === '0') reviseDanmakuName(el);
+            if (el.getAttribute('data-uid') === '0') reviseDanmakuName(el);
           } catch (e) {}
         });
       });

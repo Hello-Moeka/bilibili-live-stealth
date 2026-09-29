@@ -2,11 +2,12 @@
 const assert = require('assert');
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 
 describe('build', () => {
   it('生成 .user.js 文件,含 Tampermonkey 元数据头与各模块', () => {
-    execSync('node build.js', { cwd: path.join(__dirname, '..') });
+    const buildPath = require.resolve('../build.js');
+    delete require.cache[buildPath];
+    require(buildPath);
     const file = path.join(__dirname, '..', 'bilibili-live-stealth.user.js');
     assert.ok(fs.existsSync(file), '应生成 user.js');
     const content = fs.readFileSync(file, 'utf8');

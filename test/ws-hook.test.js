@@ -107,9 +107,11 @@ describe('installWsHook', () => {
     win.document.body.innerHTML = '<div id="chat-items"></div>';
 
     let requests = 0;
+    let historyUsedCredentials = false;
     win.XMLHttpRequest = class {
       open() {}
       send() {
+        historyUsedCredentials = this.withCredentials === true;
         const response = requests++ === 0
           ? { code: 0, data: { room: [] } }
           : { code: 0, data: { room: [{ check_info: { ct: 'target-ct' }, nickname: '真实用户名', uid: 123 }] } };
@@ -125,16 +127,23 @@ describe('installWsHook', () => {
 
     const danmaku = win.document.createElement('div');
     danmaku.className = 'danmaku-item';
-    danmaku.setAttribute('data-ct', 'target-ct');
-    danmaku.setAttribute('data-a', '1');
-    danmaku.setAttribute('data-b', '2');
-    danmaku.setAttribute('data-c', '3');
+    // 按 2026-09-29 实际直播页的属性顺序构造；不能依赖 getAttributeNames() 的下标。
+    danmaku.setAttribute('data-uname', '真***');
+    danmaku.setAttribute('data-type', '0');
+    danmaku.setAttribute('data-show_reply', 'true');
+    danmaku.setAttribute('data-replymid', '0');
     danmaku.setAttribute('data-uid', '0');
+    danmaku.setAttribute('data-anon-uid', '');
+    danmaku.setAttribute('data-ct', 'target-ct');
     danmaku.innerHTML = '<span class="user-name">*** : </span>';
     win.document.getElementById('chat-items').appendChild(danmaku);
 
     await new Promise(resolve => setTimeout(resolve, 1100));
     assert.strictEqual(danmaku.querySelector('.user-name').textContent, '真实用户名 : ');
+    assert.strictEqual(danmaku.getAttribute('data-uname'), '真实用户名');
+    assert.strictEqual(danmaku.getAttribute('data-uid'), '123');
+    assert.strictEqual(danmaku.getAttribute('data-type'), '0');
     assert.strictEqual(requests, 2);
+    assert.strictEqual(historyUsedCredentials, true, '跨源历史请求应携带浏览器登录态');
   });
 });
